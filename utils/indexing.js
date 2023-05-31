@@ -4,6 +4,7 @@ import fillerMap from './fillerMap.js';
 import { convertToEmbedding } from './embedding.js';
 import { checkFileExists } from './ingestion.js';
 import fs from 'fs/promises';
+import { extractPageContentAndMetadata } from './ingestion.js';
 
 /**
  * Search the sentence in the indexing and return the nearest neighbors.
