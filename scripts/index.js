@@ -1,18 +1,12 @@
+import { checkFileExists } from '../utils/ingestion.js';
+import { loadModel } from '../utils/embedding.js';
 import {
-    extractPageContentAndMetadata,
-    checkFileExists,
-} from '../utils/ingestion.js';
-import { loadModel, convertToEmbedding } from '../utils/embedding.js';
-import {
-    buildIndexing,
-    returnMatchedFiller,
-    createID,
-    addToIndex,
-    addBulkToIndex,
-    addBulkToContentsIndex,
     loadIndexFromFile,
+    buildIndexing,
     addEmbeddings,
+    returnMatchedFiller,
 } from '../utils/indexing.js';
+import { deleteEmbeddings } from './deleteUsingID.js';
 
 // ------------------------------------------------------------------------------------------- //
 // IMPLEMENT THIS INTO AIRCHAT SO THAT IT ONLY RUNS ONCE (IDEALLY BEFORE THE CALL EVEN STARTS) //
@@ -79,8 +73,15 @@ const results = await returnMatchedFiller(
     sentence,
     nearestNeighbors,
     DEBUG
-    // contentsMapPath
+    // contentsMapPath // This is optional Search post processing to append the contents text to the matched embeddings
 );
 console.log(results);
-
 // console.table(results);
+
+// ------------------------------------------------------------ //
+// DELETE EMBEDDINGS FROM THE VECTOR STORE (See Examples Below) //
+// ------------------------------------------------------------ //
+
+const staticIndexPath = './data/indexing/index.hnsw';
+const idToDelete = 0; // Reference ./docs/indexing/contentsMap.json for the specific number
+await deleteEmbeddings(staticIndexPath, idToDelete);
