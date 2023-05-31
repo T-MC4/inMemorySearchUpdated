@@ -11,6 +11,7 @@ import {
     addBulkToIndex,
     addBulkToContentsIndex,
     loadIndexFromFile,
+    addEmbeddings,
 } from '../utils/indexing.js';
 
 // ------------------------------------------------------------------------------------------- //
@@ -43,6 +44,7 @@ const { fillersIDs = [], contents = [] } = extractionResult || {};
 // Check if the indexing exists
 const is_existing_index = await checkFileExists(indexingPath);
 
+// Load the existing index of create a new one
 if (is_existing_index) {
     console.log('Static Index File Exists - Loading File');
     // Load the existing index
@@ -62,38 +64,17 @@ if (is_existing_index) {
         DEBUG
     );
 }
-// Get the current count
-counterID = indexing.getCurrentCount();
 
-console.log('Total Text:', contents.length);
-// if there is any content, add it to the indexing
-if (contents.length) {
-    const start = performance.now();
-    const newContentIDs = [];
-    const newIDs = [];
-
-    // Convert the text to an embedding.
-    const embeddings = await convertToEmbedding(model, contents, DEBUG);
-
-    // Add the embedding to the indexing and append to the contentsMap
-    for (let i = 0; i < fillersIDs.length; i++) {
-        counterID += 1;
-        newContentIDs.push([counterID, contents[i]]);
-        newIDs.push(createID(counterID, fillersIDs[i]));
-    }
-    console.log(newIDs);
-
-    await addBulkToContentsIndex(contentsMapPath, newContentIDs, DEBUG);
-    addBulkToIndex(indexingPath, indexing, embeddings, newIDs, DEBUG);
-
-    if (DEBUG) {
-        console.log(
-            `\nIndexing took ${performance.now() - start} milliseconds. shape ${
-                embeddings.length
-            }`
-        );
-    }
-}
+// Add any embeddings grabbed from the to_process folder earlier
+await addEmbeddings(
+    model,
+    indexingPath,
+    indexing,
+    contents,
+    fillersIDs,
+    DEBUG,
+    contentsMapPath
+);
 
 // ----------------------------------------------------- //
 // MAKE QUERIES TO THE VECTOR STORE (See Examples Below) //

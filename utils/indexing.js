@@ -290,3 +290,58 @@ export function getFillerID(id) {
 export function getCounterID(id) {
     return Math.floor(id / 100);
 }
+
+/**
+ * Add the Bulks Embeddings to the indexing.
+ *
+ * @param {Object} model - The model to use for the conversion
+ * @param {string} indexingPath - The path to load the indexing from or save a new one to.
+ * @param {Object} indexing - The indexing to add the point to
+ * @param {Array} contents - The array of extracted pageContent values
+ * @param {Array} fillersIDs - The array of extracted fillerIDs values
+ * @param {string} debug - Whether to print debug information
+ */
+export async function addEmbeddings(
+    model,
+    indexingPath,
+    indexing,
+    contents,
+    fillersIDs,
+    DEBUG,
+    contentsMapPath
+) {
+    let counterID = 1;
+
+    // Get the current count
+    counterID = indexing.getCurrentCount();
+
+    console.log('Total Text:', contents.length);
+    // if there is any content, add it to the indexing
+    if (contents.length) {
+        const start = performance.now();
+        const newContentIDs = [];
+        const newIDs = [];
+
+        // Convert the text to an embedding.
+        const embeddings = await convertToEmbedding(model, contents, DEBUG);
+
+        // Add the embedding to the indexing and append to the contentsMap
+        for (let i = 0; i < fillersIDs.length; i++) {
+            counterID += 1;
+            newContentIDs.push([counterID, contents[i]]);
+            newIDs.push(createID(counterID, fillersIDs[i]));
+        }
+        console.log(newIDs);
+
+        await addBulkToContentsIndex(contentsMapPath, newContentIDs, DEBUG);
+        addBulkToIndex(indexingPath, indexing, embeddings, newIDs, DEBUG);
+
+        if (DEBUG) {
+            console.log(
+                `\nIndexing took ${
+                    performance.now() - start
+                } milliseconds. shape ${embeddings.length}`
+            );
+        }
+    }
+}
