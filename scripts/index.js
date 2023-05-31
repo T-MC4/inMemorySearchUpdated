@@ -1,16 +1,17 @@
 import {
-	extractPageContentAndMetadata,
-	checkFileExists,
-} from "../utils/ingestion.js";
-import { loadModel, convertToEmbedding } from "../utils/embedding.js";
+    extractPageContentAndMetadata,
+    checkFileExists,
+} from '../utils/ingestion.js';
+import { loadModel, convertToEmbedding } from '../utils/embedding.js';
 import {
-	buildIndexing,
-	returnMatchedFiller,
-	createID,
-	addToIndex,
-	addBulkToIndex,
-	loadIndexFromFile,
-} from "../utils/indexing.js";
+    buildIndexing,
+    returnMatchedFiller,
+    createID,
+    addToIndex,
+    addBulkToIndex,
+    addBulkToContentsIndex,
+    loadIndexFromFile,
+} from '../utils/indexing.js';
 
 // ------------------------------------------------------------------------------------------- //
 // IMPLEMENT THIS INTO AIRCHAT SO THAT IT ONLY RUNS ONCE (IDEALLY BEFORE THE CALL EVEN STARTS) //
@@ -19,65 +20,79 @@ import {
 const DEBUG = true;
 const numDimensions = 512; // the length of data point vector that will be indexed.
 const maxElements = 100000; // the maximum number of data points.
-const dataProcessingPath = "./data/to_process";
-const dataProcessedPath = "./data/processed";
-const indexingPath = "./data/indexing/index.hnsw";
+const dataProcessingPath = './data/to_process';
+const dataProcessedPath = './data/processed';
+const indexingPath = './data/indexing/vectorIndex.hnsw';
+const contentsMapPath = './data/indexing/contentsMap.json';
 let counterID = 1;
 let indexing;
 
 const model = await loadModel(DEBUG);
 
 // Read all the files in the directory and return the content and move the files to the processed folder.
-const { fillersIDs, contents } = await extractPageContentAndMetadata(
-	dataProcessingPath,
-	dataProcessedPath,
-	"json",
-	DEBUG
+const extractionResult = await extractPageContentAndMetadata(
+    dataProcessingPath,
+    dataProcessedPath,
+    'json',
+    DEBUG
 );
 
-const is_existing_index = await checkFileExists(indexingPath);
+// Extract valid values and assign empty if not valid
+const { fillersIDs = [], contents = [] } = extractionResult || {};
+
 // Check if the indexing exists
+const is_existing_index = await checkFileExists(indexingPath);
+
 if (is_existing_index) {
-	// Load the existing index
-	indexing = await loadIndexFromFile(
-		indexingPath,
-		numDimensions,
-		maxElements,
-		DEBUG
-	);
+    console.log('Static Index File Exists - Loading File');
+    // Load the existing index
+    indexing = await loadIndexFromFile(
+        indexingPath,
+        numDimensions,
+        maxElements,
+        DEBUG
+    );
 } else {
-	// Build the new indexing
-	indexing = await buildIndexing(
-		indexingPath,
-		numDimensions,
-		maxElements,
-		DEBUG
-	);
+    console.log('No Index File - Building From Scratch');
+    // Build the new indexing
+    indexing = await buildIndexing(
+        indexingPath,
+        numDimensions,
+        maxElements,
+        DEBUG
+    );
 }
 // Get the current count
 counterID = indexing.getCurrentCount();
 
-console.log("Total Text:", contents.length);
+console.log('Total Text:', contents.length);
 // if there is any content, add it to the indexing
 if (contents.length) {
-	const start = performance.now();
-	// Convert the text to an embedding.
-	const embeddings = await convertToEmbedding(model, contents, DEBUG);
-	// Add the embedding to the indexing
-	const newIDs = fillersIDs.map((id) => {
-		counterID += 1;
-		return createID(counterID, id);
-	});
+    const start = performance.now();
+    const newContentIDs = [];
+    const newIDs = [];
 
-	addBulkToIndex(indexingPath, indexing, embeddings, newIDs, DEBUG);
+    // Convert the text to an embedding.
+    const embeddings = await convertToEmbedding(model, contents, DEBUG);
 
-	if (DEBUG) {
-		console.log(
-			`\nIndexing took ${performance.now() - start} milliseconds. shape ${
-				embeddings.length
-			}`
-		);
-	}
+    // Add the embedding to the indexing and append to the contentsMap
+    for (let i = 0; i < fillersIDs.length; i++) {
+        counterID += 1;
+        newContentIDs.push([counterID, contents[i]]);
+        newIDs.push(createID(counterID, fillersIDs[i]));
+    }
+    console.log(newIDs);
+
+    await addBulkToContentsIndex(contentsMapPath, newContentIDs, DEBUG);
+    addBulkToIndex(indexingPath, indexing, embeddings, newIDs, DEBUG);
+
+    if (DEBUG) {
+        console.log(
+            `\nIndexing took ${performance.now() - start} milliseconds. shape ${
+                embeddings.length
+            }`
+        );
+    }
 }
 
 // ----------------------------------------------------- //
@@ -85,61 +100,17 @@ if (contents.length) {
 // ----------------------------------------------------- //
 
 // Perform a nearest neighbor search
-const sentence = `I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary
-  is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following
-  CPU instructions in performance-critical operations:  AVX2 FMA
-  I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary
-  is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following
-  CPU instructions in performance-critical operations:  AVX2 FMAoperations:  AVX2 FMA`;
-const sentence2 = `Test`;
-const sentence3 = `Yeah dude`;
-const sentence4 = `I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary
-is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following
-CPU instructions in performance-critical operations:  AVX2 FMA
-I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary
-is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following
-CPU instructions in performance-critical operations:  AVX2 FMAoperations:  AVX2 FMA. 
-I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary
-  is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following
-  CPU instructions in performance-critical operations:  AVX2 FMA
-  I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary
-  is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following
-  CPU instructions in performance-critical operations:  AVX2 FMAoperations:  AVX2 FMA`;
-
-const nearestNeighbors = 1; // the number of nearest neighbors to search.
+const sentence = `my wife left me`;
+const nearestNeighbors = 5; // the number of nearest neighbors to search.
 
 const results = await returnMatchedFiller(
-	indexing,
-	model,
-	sentence,
-	nearestNeighbors,
-	DEBUG
+    indexing,
+    model,
+    sentence,
+    nearestNeighbors,
+    DEBUG
+    // contentsMapPath
 );
-const results2 = await returnMatchedFiller(
-	indexing,
-	model,
-	sentence2,
-	nearestNeighbors,
-	DEBUG
-);
-const results3 = await returnMatchedFiller(
-	indexing,
-	model,
-	sentence3,
-	nearestNeighbors,
-	DEBUG
-);
-const results4 = await returnMatchedFiller(
-	indexing,
-	model,
-	sentence4,
-	nearestNeighbors,
-	DEBUG
-);
+console.log(results);
 
-console.log(
-	results.fillers,
-	results2.fillers,
-	results3.fillers,
-	results4.fillers
-);
+// console.table(results);

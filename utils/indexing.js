@@ -1,7 +1,9 @@
-import pkg from "hnswlib-node"; // Import the HNSW library
+import pkg from 'hnswlib-node'; // Import the HNSW library
 const { HierarchicalNSW } = pkg;
-import fillerMap from "./fillerMap.js";
-import { convertToEmbedding } from "./embedding.js";
+import fillerMap from './fillerMap.js';
+import { convertToEmbedding } from './embedding.js';
+import { checkFileExists } from './ingestion.js';
+import fs from 'fs/promises';
 
 /**
  * Search the sentence in the indexing and return the nearest neighbors.
@@ -14,23 +16,23 @@ import { convertToEmbedding } from "./embedding.js";
  * @returns - The nearest neighbors which contains distances and IDs with the embedding.
  */
 export async function vectorSearch(
-  sentences,
-  model,
-  indexing,
-  nearestNeighbors,
-  debug = false
+    sentences,
+    model,
+    indexing,
+    nearestNeighbors,
+    debug = false
 ) {
-  // Convert the sentence to an embedding.
-  const queryVector = await convertToEmbedding(model, sentences, debug);
+    // Convert the sentence to an embedding.
+    const queryVector = await convertToEmbedding(model, sentences, debug);
 
-  const start = performance.now();
+    const start = performance.now();
 
-  const result = indexing.searchKnn(queryVector[0], nearestNeighbors);
-  if (debug) {
-    console.log(`\nSearch took ${performance.now() - start} milliseconds.`);
-  }
+    const result = indexing.searchKnn(queryVector[0], nearestNeighbors);
+    if (debug) {
+        console.log(`\nSearch took ${performance.now() - start} milliseconds.`);
+    }
 
-  return { ...result, embedding: queryVector[0] };
+    return { ...result, embedding: queryVector[0] };
 }
 
 /**
@@ -44,34 +46,46 @@ export async function vectorSearch(
  * @returns - The matched filler
  */
 export async function returnMatchedFiller(
-  indexing,
-  model,
-  text,
-  nearestNeighbors,
-  debug
-) {
-  let result = await vectorSearch(
-    [text],
-    model,
     indexing,
+    model,
+    text,
     nearestNeighbors,
-    debug
-  );
-
-  let start = performance.now();
-
-  const fillers = result.neighbors.map((id) => {
-    return fillerMap.get(getFillerID(id));
-  });
-
-  if (debug) {
-    console.log(
-      `\nSearching post processing took ${
-        performance.now() - start
-      } milliseconds (ie. converting embedding ID into fillerText value).`
+    debug,
+    contentsMapPath
+) {
+    let result = await vectorSearch(
+        [text],
+        model,
+        indexing,
+        nearestNeighbors,
+        debug
     );
-  }
-  return { ...result, fillers };
+
+    let start = performance.now();
+
+    const fillers = result.neighbors.map((id) => {
+        return fillerMap.get(getFillerID(id));
+    });
+
+    let pageContent = [];
+    if (contentsMapPath) {
+        const contentsMap = new Map(
+            JSON.parse(await fs.readFile(contentsMapPath, 'utf-8'))
+        );
+
+        pageContent = result.neighbors.map((id) => {
+            return contentsMap.get(getCounterID(id));
+        });
+    }
+
+    if (debug) {
+        console.log(
+            `\nSearching post processing took ${
+                performance.now() - start
+            } milliseconds (ie. converting embedding ID into fillerText value).`
+        );
+    }
+    return { ...result, fillers, pageContent };
 }
 
 /**
@@ -84,19 +98,19 @@ export async function returnMatchedFiller(
  * @returns - The indexing
  */
 export function buildIndexing(path, numDimensions, maxElements, debug = false) {
-  const start = performance.now();
+    const start = performance.now();
 
-  const indexing = new HierarchicalNSW("cosine", numDimensions);
-  indexing.initIndex(maxElements);
+    const indexing = new HierarchicalNSW('cosine', numDimensions);
+    indexing.initIndex(maxElements);
 
-  indexing.writeIndexSync(path);
+    indexing.writeIndexSync(path);
 
-  if (debug) {
-    console.log(
-      `\nBuilding Index took ${performance.now() - start} milliseconds.`
-    );
-  }
-  return indexing;
+    if (debug) {
+        console.log(
+            `\nBuilding Index took ${performance.now() - start} milliseconds.`
+        );
+    }
+    return indexing;
 }
 
 /**
@@ -109,18 +123,17 @@ export function buildIndexing(path, numDimensions, maxElements, debug = false) {
  * @param {boolean} debug - Whether to print debug information
  */
 export function addToIndex(path, indexing, embedding, ID, debug) {
-  const start = performance.now();
+    const start = performance.now();
 
-  indexing.addPoint(embedding, ID);
-  indexing.writeIndexSync(path);
+    indexing.addPoint(embedding, ID);
+    indexing.writeIndexSync(path);
 
-  if (debug) {
-    console.log(
-      `\nAdd to index took ${performance.now() - start} milliseconds.`
-    );
-  }
+    if (debug) {
+        console.log(
+            `\nAdd to index took ${performance.now() - start} milliseconds.`
+        );
+    }
 }
-
 
 /**
  * Add the Bulks Embeddings to the indexing.
@@ -131,19 +144,63 @@ export function addToIndex(path, indexing, embedding, ID, debug) {
  * @param {number} ID - The ID to add
  * @param {boolean} debug - Whether to print debug information
  */
- export function addBulkToIndex(path, indexing, embeddings, IDs, debug) {
-  const start = performance.now();
+export function addBulkToIndex(path, indexing, embeddings, IDs, debug) {
+    const start = performance.now();
 
-  embeddings.forEach((embedding,index) => {
-    indexing.addPoint(embedding, IDs[index]);
-  });
-  indexing.writeIndexSync(path);
+    embeddings.forEach((embedding, index) => {
+        indexing.addPoint(embedding, IDs[index]);
+    });
+    indexing.writeIndexSync(path);
 
-  if (debug) {
-    console.log(
-      `\nAdd Bulk ${embeddings.length} to index took ${performance.now() - start} milliseconds.`
-    );
-  }
+    if (debug) {
+        console.log(
+            `\nAdd Bulk ${embeddings.length} to index took ${
+                performance.now() - start
+            } milliseconds.`
+        );
+    }
+}
+
+/**
+ * Add the contentIDs & contentText to a static file
+ *
+ * @param {string} path - The path to save the indexing.
+ * @param {array} newContentIDs - The array of objects to add
+ * @param {boolean} debug - Whether to print debug information
+ */
+export async function addBulkToContentsIndex(path, newContentIDs, debug) {
+    try {
+        const start = performance.now();
+        let contentMap = new Map();
+
+        if (await checkFileExists(path)) {
+            const existingData = await fs.readFile(path, 'utf-8');
+            const existingMap = new Map(JSON.parse(existingData));
+            newContentIDs.forEach(([key, value]) =>
+                existingMap.set(key, value)
+            );
+            contentMap = existingMap;
+            console.log('Successfully updated Map.');
+        } else {
+            newContentIDs.forEach(([key, value]) => contentMap.set(key, value));
+            console.log('Successfully created Map.');
+        }
+
+        await fs.writeFile(
+            path,
+            JSON.stringify(Array.from(contentMap.entries()), null, 2)
+        );
+
+        if (debug) {
+            console.log(
+                `\nAdd Bulk ${newContentIDs.length} to contentIDs file took ${
+                    performance.now() - start
+                } milliseconds.`
+            );
+        }
+    } catch (error) {
+        console.log('Error:', error);
+    }
 }
 
 /**
@@ -155,19 +212,21 @@ export function addToIndex(path, indexing, embedding, ID, debug) {
  * @param {boolean} debug - Whether to print debug information
  */
 export function deleteFromIndex(path, indexing, ID, debug) {
-  const start = performance.now();
-  try {
-    indexing.markDelete(ID);
-    indexing.writeIndexSync(path);
-  } catch (e) {
-    console.log(e);
-  }
+    const start = performance.now();
+    try {
+        indexing.markDelete(ID);
+        indexing.writeIndexSync(path);
+    } catch (e) {
+        console.log(e);
+    }
 
-  if (debug) {
-    console.log(
-      `\nDelete from index took ${performance.now() - start} milliseconds.`
-    );
-  }
+    if (debug) {
+        console.log(
+            `\nDelete from index took ${
+                performance.now() - start
+            } milliseconds.`
+        );
+    }
 }
 
 /**
@@ -180,24 +239,24 @@ export function deleteFromIndex(path, indexing, ID, debug) {
  * @returns - The indexing
  */
 export async function loadIndexFromFile(
-  path,
-  numDimensions,
-  maxElements,
-  debug = false
+    path,
+    numDimensions,
+    maxElements,
+    debug = false
 ) {
-  const start = performance.now();
+    const start = performance.now();
 
-  // Load index data from file
-  const indexing = new HierarchicalNSW("cosine", numDimensions);
-  indexing.readIndexSync(path, true);
-  indexing.resizeIndex(maxElements);
-  if (debug) {
-    console.log(
-      `\nLoading Index took ${performance.now() - start} milliseconds.`
-    );
-  }
+    // Load index data from file
+    const indexing = new HierarchicalNSW('cosine', numDimensions);
+    indexing.readIndexSync(path, true);
+    indexing.resizeIndex(maxElements);
+    if (debug) {
+        console.log(
+            `\nLoading Index took ${performance.now() - start} milliseconds.`
+        );
+    }
 
-  return indexing;
+    return indexing;
 }
 
 /**
@@ -207,9 +266,9 @@ export async function loadIndexFromFile(
  * @param {number} fillerID - The filler ID
  * @returns - The ID
  */
-export function createID(index, fillerID) {
-  const id = index * 100 + fillerID;
-  return id;
+export function createID(counterID, fillerID) {
+    const id = counterID * 100 + fillerID;
+    return id;
 }
 
 /**
@@ -219,5 +278,15 @@ export function createID(index, fillerID) {
  * @returns - The filler ID
  */
 export function getFillerID(id) {
-  return id % 100;
+    return id % 100;
+}
+
+/**
+ * Get the counter ID from the ID.
+ *
+ * @param {number} id - The ID
+ * @returns - The counter ID
+ */
+export function getCounterID(id) {
+    return Math.floor(id / 100);
 }

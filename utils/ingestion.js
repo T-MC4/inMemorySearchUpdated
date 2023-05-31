@@ -1,33 +1,36 @@
-import fs from "fs";
-import path from "path";
+import fs from 'fs/promises';
+import path from 'path';
 
-export function readFileContent(filePath) {
-	return new Promise((resolve, reject) => {
-		fs.readFile(filePath, "utf-8", (err, data) => {
-			if (err) {
-				reject(err);
-			} else {
-				resolve(data);
-			}
-		});
-	});
+export async function readFileContent(filePath) {
+    console.log(`\nReading content`);
+    const data = await fs.readFile(filePath, 'utf-8');
+    return data;
 }
 
 export async function getFilesInDirectory(directoryPath, fileType) {
-	const files = await fs.promises.readdir(directoryPath);
-	const filteredFiles = files.filter(
-		(file) => path.extname(file).toLowerCase() === `.${fileType}`
-	);
-	return filteredFiles;
+    const files = await fs.readdir(directoryPath);
+    const filteredFiles = files.filter(
+        (file) => path.extname(file).toLowerCase() === `.${fileType}`
+    );
+    return filteredFiles;
+}
+
+async function isDirectoryEmpty(directoryPath) {
+    try {
+        const files = fs.readdir(directoryPath);
+        return files.length === 0;
+    } catch (error) {
+        throw error;
+    }
 }
 
 export async function checkFileExists(filePath) {
-	try {
-		fs.accessSync(filePath);
-		return true;
-	} catch (error) {
-		return false;
-	}
+    try {
+        await fs.access(filePath);
+        return true;
+    } catch (error) {
+        return false;
+    }
 }
 
 /**
@@ -40,48 +43,74 @@ export async function checkFileExists(filePath) {
  * @returns - Array which contains the page content and the ID.
  */
 export async function extractPageContentAndMetadata(
-	baseDir,
-	processedBaseDir,
-	extension,
-	debug = false
+    baseDir,
+    processedBaseDir,
+    extension,
+    debug = false
 ) {
-	let start = performance.now();
-	// Load data to build the indexing
-	const arrayOfJSONFiles = await getFilesInDirectory(baseDir, extension);
+    // Instantiate stores for the two properties we want to extract for each object
+    const contents = [];
+    const fillersIDs = [];
 
-	let jsonContent = [];
+    // Check if there are files to extract from
+    const is_empty = await isDirectoryEmpty(baseDir);
 
-	// Process all the new files
-	for (const fileName of arrayOfJSONFiles) {
-		// Read the contents
-		const filePath = path.join(baseDir, fileName);
-		const content = await readFileContent(filePath);
-		jsonContent = [...jsonContent, ...JSON.parse(content)];
-		// Move file to 'processed' folder indicate it's done
-		const destPath = path.join(processedBaseDir, fileName);
-		fs.renameSync(filePath, destPath);
-		if (debug) {
-			console.log(`${fileName} File Read & Moved successfully`);
-		}
-	}
+    if (is_empty) {
+        console.log('No files to extract from');
+        return {
+            contents,
+            fillersIDs,
+        };
+    } else {
+        let start = performance.now();
 
-	// Load the existing index
-	const contents = [];
-	const fillersIDs = [];
+        // Load data to build the indexing
+        let arrayOfJSONFiles = await getFilesInDirectory(baseDir, extension);
 
-	// Update the existing index
-	jsonContent.forEach((entry) => {
-		contents.push(entry.pageContent);
-		fillersIDs.push(entry.metadata.fillerID);
-	});
+        let jsonContent = [];
 
-	if (debug) {
-		console.log(
-			`\nReading all files took ${performance.now() - start} milliseconds.`
-		);
-	}
-	return {
-		contents,
-		fillersIDs,
-	};
+        // Process all the new files
+        for (const fileName of arrayOfJSONFiles) {
+            // Read the contents
+            const filePath = path.join(baseDir, fileName);
+            const content = await readFileContent(filePath);
+
+            // If not empty
+            if (content) {
+                // Append new text to the array
+                jsonContent = [...jsonContent, ...JSON.parse(content)];
+
+                // Move file to 'processed' folder to indicate it's done
+                const destPath = path.join(processedBaseDir, fileName);
+                fs.rename(filePath, destPath);
+                if (debug) {
+                    console.log(`${fileName} File Read & Moved successfully`);
+                }
+            } else {
+                console.log('No Content to extract from');
+                if (debug) {
+                    console.log(`${fileName} File Read But Not Moved`);
+                }
+            }
+        }
+
+        // Update the index
+        jsonContent.forEach((entry) => {
+            contents.push(entry.pageContent);
+            fillersIDs.push(entry.metadata.fillerID);
+        });
+
+        if (debug) {
+            console.log(
+                `\nProcessing all files from to_process took ${
+                    performance.now() - start
+                } milliseconds.`
+            );
+        }
+
+        return {
+            contents,
+            fillersIDs,
+        };
+    }
 }
