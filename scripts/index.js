@@ -30,17 +30,6 @@ let indexing;
 
 const model = await loadModel(DEBUG);
 
-// Read all the files in the directory and return the content and move the files to the processed folder.
-const extractionResult = await extractPageContentAndMetadata(
-    dataProcessingPath,
-    dataProcessedPath,
-    'json',
-    DEBUG
-);
-
-// Extract valid values and assign empty if not valid
-const { fillersIDs = [], contents = [] } = extractionResult || {};
-
 // Check if the indexing exists
 const is_existing_index = await checkFileExists(indexingPath);
 
@@ -68,10 +57,10 @@ if (is_existing_index) {
 // Add any embeddings grabbed from the to_process folder earlier
 await addEmbeddings(
     model,
+    dataProcessingPath,
+    dataProcessedPath,
     indexingPath,
     indexing,
-    contents,
-    fillersIDs,
     DEBUG,
     contentsMapPath
 );

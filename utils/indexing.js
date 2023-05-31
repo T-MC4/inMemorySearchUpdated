@@ -303,13 +303,24 @@ export function getCounterID(id) {
  */
 export async function addEmbeddings(
     model,
+    dataProcessingPath,
+    dataProcessedPath,
     indexingPath,
     indexing,
-    contents,
-    fillersIDs,
     DEBUG,
     contentsMapPath
 ) {
+    // Read all the files in the directory and return the content and move the files to the processed folder.
+    const extractionResult = await extractPageContentAndMetadata(
+        dataProcessingPath,
+        dataProcessedPath,
+        'json',
+        DEBUG
+    );
+
+    // Extract valid values and assign empty if not valid
+    const { fillersIDs = [], contents = [] } = extractionResult || {};
+
     let counterID = 1;
 
     // Get the current count
